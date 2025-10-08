@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CommonMetadata",
+  "description": "Common metadata used across events and REST calls",
+  "type": "object",
+  "properties": {
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "requestId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "traceId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "correlationId",
+    "timestamp"
+  ]
+}

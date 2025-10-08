@@ -1,0 +1,35 @@
+openapi: 3.2.0
+info:
+  title: Processor Internal API (Authorize UC)
+  version: v1
+  description: "Internal processor endpoints (health/admin). Processor is primarily event-driven."
+servers:
+  - url: https://processor.internal
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+  /admin/reprocess/{transactionId}:
+    post:
+      summary:
+        Administrative: reprocess a transaction (manual)
+      parameters:
+        - in: path
+          name: transactionId
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200': { description: Reprocessing scheduled }
+components: { }
+security: [ ]

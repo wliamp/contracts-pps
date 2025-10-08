@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FraudRequestV1",
+  "description": "Event produced by Processor for fraud scoring",
+  "type": "object",
+  "properties": {
+    "eventType": {
+      "const": "FRAUD_REQUESTED"
+    },
+    "transactionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "merchantId": {
+      "type": "string"
+    },
+    "payerId": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "number"
+    },
+    "currency": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "eventType",
+    "transactionId",
+    "correlationId",
+    "merchantId",
+    "payerId",
+    "amount",
+    "currency",
+    "timestamp"
+  ]
+}

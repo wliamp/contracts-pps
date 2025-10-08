@@ -1,0 +1,49 @@
+openapi: 3.2.0
+info:
+  title: Network Service API (Authorize UC)
+  version: v1
+  description: "Network service routes requests to issuers (simulates ISO8583/transform). Called synchronously by Processor."
+servers:
+  - url: https://network.internal
+paths:
+  /v1/network/route:
+    post:
+      summary: Route authorize request to Issuer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NetworkRouteRequest'
+      responses:
+        '200':
+          description: Network response wrapper
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NetworkRouteResponse'
+components:
+  schemas:
+    NetworkRouteRequest:
+      type: object
+      properties:
+        transactionId: { type: string, format: uuid }
+        correlationId: { type: string, format: uuid }
+        merchantId: { type: string }
+        payerId: { type: string }
+        amount: { type: number }
+        currency: { type: string }
+      required: [ transactionId, correlationId, amount, currency ]
+    NetworkRouteResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ OK, ERROR ]
+        payload:
+          type: object
+          description: "Raw issuer payload (opaque to caller)"
+        error:
+          type: string
+      required: [ status ]
+security: [ ]

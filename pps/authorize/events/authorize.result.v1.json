@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AuthorizeResultV1",
+  "description": "Event produced by Processor with final authorization result",
+  "type": "object",
+  "properties": {
+    "eventType": {
+      "const": "AUTHORIZE_RESULT"
+    },
+    "transactionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "APPROVED",
+        "DECLINED",
+        "ERROR"
+      ]
+    },
+    "authorizeCode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "issuer": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "number"
+    },
+    "currency": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "eventType",
+    "transactionId",
+    "correlationId",
+    "status",
+    "issuer",
+    "timestamp"
+  ]
+}

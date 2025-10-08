@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AuditLogV1",
+  "description": "Append-only audit log entries produced by any service",
+  "type": "object",
+  "properties": {
+    "eventType": {
+      "const": "AUDIT_LOG"
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "transactionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "AUTHORIZE_INITIATED",
+        "AUTHORIZE_APPROVED",
+        "AUTHORIZE_DECLINED",
+        "FRAUD_TRIGGERED",
+        "ERROR_OCCURRED"
+      ]
+    },
+    "actor": {
+      "type": "string",
+      "description": "service or actor that produced the audit entry"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "payloadHash": {
+      "type": "string"
+    },
+    "details": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "additional structured payload (avoid PII)"
+    }
+  },
+  "required": [
+    "eventType",
+    "correlationId",
+    "action",
+    "actor",
+    "timestamp",
+    "payloadHash"
+  ]
+}

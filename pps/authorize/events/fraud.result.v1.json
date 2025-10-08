@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "FraudResultV1",
+  "description": "Fraud service returns risk score and recommended action",
+  "type": "object",
+  "properties": {
+    "eventType": {
+      "const": "FRAUD_RESULT"
+    },
+    "transactionId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "riskScore": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "REVIEW",
+        "BLOCK"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "eventType",
+    "transactionId",
+    "correlationId",
+    "riskScore",
+    "action",
+    "timestamp"
+  ]
+}
