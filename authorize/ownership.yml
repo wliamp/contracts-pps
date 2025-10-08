@@ -1,40 +1,43 @@
-contracts:
-    - name: authorize.request.v1
-      file: events/authorize.request.v1.json
-      producer: gateway
-      consumers: [processor, fraud-risk, regulator]
+events:
+  - name: authorize.request.v1
+    file: events/authorize.request.v1.json
+    producer: gateway
+    consumers: [processor, fraud-risk, regulator]
 
-    - name: authorize.result.v1
-      file: events/authorize.result.v1.json
-      producer: processor
-      consumers: [gateway, regulator]
+  - name: authorize.result.v1
+    file: events/authorize.result.v1.json
+    producer: processor
+    consumers: [gateway, regulator]
 
-    - name: fraud.request.v1
-      file: events/fraud.request.v1.json
-      producer: processor
-      consumers: [fraud-risk]
+  - name: fraud.request.v1
+    file: events/fraud.request.v1.json
+    producer: processor
+    consumers: [fraud-risk]
 
-    - name: fraud.result.v1
-      file: events/fraud.result.v1.json
-      producer: fraud-risk
-      consumers: [processor]
+  - name: fraud.result.v1
+    file: events/fraud.result.v1.json
+    producer: fraud-risk
+    consumers: [processor]
 
-    - name: audit.log.v1
-      file: events/audit.log.v1.json
-      producer: [gateway, processor, fraud-risk]
-      consumers: [regulator]
+  - name: audit.log.v1
+    file: events/audit.log.v1.json
+    producer: [gateway, processor, fraud-risk]
+    consumers: [regulator]
 
-rest:
-    - service: gateway
-      spec: openapi/gateway.v1.yml
-    - service: processor
-      spec: openapi/processor.v1.yml
-    - service: network
-      spec: openapi/network.v1.yml
-    - service: issuer
-      spec: openapi/issuer.v1.yml
+openapi:
+  - service: gateway
+    spec: openapi/gateway.v1.yml
+  - service: processor
+    spec: openapi/processor.v1.yml
+  - service: network
+    spec: openapi/network.v1.yml
+  - service: issuer
+    spec: openapi/issuer.v1.yml
 
-metadata:
-    usecase: authorize
-    version: v1
-    contact: "platform-apis-team@example.com"
+shared:
+  usecase: authorize
+  version: v1
+  contact: "platform-apis-team@example.com"
+  schemas:
+    - file: shared/common-metadata.json
+      description: "Base metadata used across events and REST specs"

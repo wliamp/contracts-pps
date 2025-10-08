@@ -1,0 +1,194 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-contracts:
+    runs-on: ubuntu-latest
+
+    env:
+      OSSRH_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+      OSSRH_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+      GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+    steps:
+      # ----------------------
+      # 🧩 Setup environment
+      # ----------------------
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Java and Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 25
+          cache: gradle
+          server-id: ossrh
+          server-username: OSSRH_USERNAME
+          server-password: OSSRH_PASSWORD
+          gpg-private-key: GPG_PRIVATE_KEY
+          gpg-passphrase: GPG_PASSPHRASE
+
+      - name: Install required tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y yq jq curl zip libxml2-utils
+
+      # ----------------------
+      # 🧱 Prepare build stage
+      # ----------------------
+      - name: Initialize build directories
+        run: mkdir -p build
+
+      # ----------------------
+      # 🔍 Discover & versioning
+      # ----------------------
+      - name: Determine new versions for all actors
+        id: versioning
+        run: |
+          COMMON_FILE="contracts/shared/common-metadata.json"
+          echo "COMMON_FILE=$COMMON_FILE" >> $GITHUB_ENV
+          
+          for uc_dir in contracts/*/; do
+            [[ "$uc_dir" == *"shared"* ]] && continue
+            echo ">>> Checking use case: $uc_dir"
+            cd "$uc_dir"
+          
+            UC=$(yq -r '.metadata.usecase' ownership.yml)
+            ACTORS=$(yq -r '.contracts[].producer, .contracts[].consumers[], .rest[].service' ownership.yml | sort -u)
+          
+            for actor in $ACTORS; do
+              META_URL="https://repo1.maven.org/maven2/io/github/wliamp/contracts/contracts-${UC}-${actor}/maven-metadata.xml"
+              LATEST=$(curl -s "$META_URL" | xmllint --xpath "string(//metadata/versioning/latest)" - 2>/dev/null || echo "")
+              if [ -z "$LATEST" ]; then LATEST="0.0.0"; fi
+          
+              IFS='.' read -r MAJ MIN PATCH <<< "$LATEST"
+          
+              PATCH=$((PATCH + 1))
+              if [ "$PATCH" -gt 9 ]; then
+                PATCH=0
+                MIN=$((MIN + 1))
+                if [ "$MIN" -gt 9 ]; then
+                  MIN=0
+                  MAJ=$((MAJ + 1))
+                fi
+              fi
+          
+              VER="${MAJ}.${MIN}.${PATCH}"
+              echo "UseCase=$UC | Actor=$actor | $LATEST → $VER"
+          
+              echo "${UC},${actor},${VER}" >> /tmp/version_map.csv
+            done
+            cd - >/dev/null
+          done
+          
+          echo "Version mapping generated:"
+          cat /tmp/version_map.csv
+          echo "VERSION_MAP=$(base64 -w0 /tmp/version_map.csv)" >> $GITHUB_ENV
+      
+
+      # ----------------------
+      # 📦 Package changed use cases
+      # ----------------------
+      - name: Package changed use cases
+        id: package
+        run: |
+          echo "$VERSION_MAP" | base64 -d > /tmp/version_map.csv
+          
+          CHANGED_UC=$(git diff --name-only HEAD~1 HEAD | grep '^contracts/' | cut -d'/' -f2 | sort -u)
+          echo "Changed UCs: $CHANGED_UC"
+          
+          SUMMARY_FILE="/tmp/publish_summary.md"
+          echo "| Use Case | Actor | Version | Artifact |" > "$SUMMARY_FILE"
+          echo "|-----------|--------|----------|-----------|" >> "$SUMMARY_FILE"
+          
+          for UC in $CHANGED_UC; do
+            echo ">>> Building UC: $UC"
+            while IFS=',' read -r CSV_UC ACTOR VER; do
+              [[ "$CSV_UC" != "$UC" ]] && continue
+          
+              echo "📦 Building ${ACTOR}-${VER}.zip (UC: $UC)"
+              UC_DIR="contracts/${UC}"
+              PKG_DIR="build/${UC}/${ACTOR}"
+              mkdir -p "$PKG_DIR"
+          
+              # Copy event contracts
+              yq -r '.contracts[] | select((.producer == "'$ACTOR'") or (.consumers[]? == "'$ACTOR'")) | .file' "$UC_DIR/ownership.yml" | while read -r f; do
+                [ -f "$UC_DIR/$f" ] && mkdir -p "$PKG_DIR/$(dirname "$f")" && cp "$UC_DIR/$f" "$PKG_DIR/$f"
+              done
+          
+              # Copy OpenAPI specs
+              yq -r '.rest[] | select(.service == "'$ACTOR'") | .spec' "$UC_DIR/ownership.yml" | while read -r f; do
+                [ -f "$UC_DIR/$f" ] && mkdir -p "$PKG_DIR/$(dirname "$f")" && cp "$UC_DIR/$f" "$PKG_DIR/$f"
+              done
+          
+              # Include shared metadata
+              if [ -f "$COMMON_FILE" ]; then
+                cp "$COMMON_FILE" "$PKG_DIR/"
+                echo "✅ Added common-metadata.json"
+              fi
+          
+              # Create zip
+              cd "build/${UC}"
+              zip -r "${ACTOR}-${VER}.zip" "$ACTOR" >/dev/null
+              cd - >/dev/null
+          
+              echo "| ${UC} | ${ACTOR} | ${VER} | ${ACTOR}-${VER}.zip |" >> "$SUMMARY_FILE"
+            done < /tmp/version_map.csv
+          done
+          
+          echo "SUMMARY_FILE=$SUMMARY_FILE" >> $GITHUB_ENV
+
+      # ----------------------
+      # 📤 Upload built artifacts
+      # ----------------------
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-contracts
+          path: build/**
+          retention-days: 7
+
+      # ----------------------
+      # 🚀 Publish to OSSRH (only changed)
+      # ----------------------
+      - name: Publish changed packages to OSSRH
+        run: |
+          echo "$VERSION_MAP" | base64 -d > /tmp/version_map.csv
+          CHANGED_UC=$(git diff --name-only HEAD~1 HEAD | grep '^contracts/' | cut -d'/' -f2 | sort -u)
+          
+          while IFS=',' read -r UC ACTOR VER; do
+            if ! echo "$CHANGED_UC" | grep -qw "$UC"; then
+              echo "⏩ Skipping unchanged UC: $UC"
+              continue
+            fi
+          
+            FILE="build/${UC}/${ACTOR}-${VER}.zip"
+            echo "🚀 Publishing $FILE"
+            ./gradlew publish \
+              -PartifactFile="$FILE" \
+              -PartifactId="${ACTOR}" \
+              -Pversion="$VER"
+            echo "✅ Published ${ACTOR} v${VER}"
+          done < /tmp/version_map.csv
+
+      # ----------------------
+      # 🧾 Job summary
+      # ----------------------
+      - name: Generate job summary
+        if: always()
+        run: |
+          echo "### 📦 Contracts Published" >> $GITHUB_STEP_SUMMARY
+          if [ -f "$SUMMARY_FILE" ]; then
+            cat "$SUMMARY_FILE" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "_No changed contracts found._" >> $GITHUB_STEP_SUMMARY
+          fi

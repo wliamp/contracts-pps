@@ -1,84 +1,46 @@
 plugins {
     id 'maven-publish'
     id 'signing'
-    id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
 }
 
-group = 'io.github.wliamp'
-version = '0.0.0'
+group = 'io.github.wliamp.contracts'
 
-allprojects {
+// ------------------------
+// Publishing configuration
+// ------------------------
+publishing {
+    publications {
+        mavenContracts(MavenPublication) {
+            artifactId = project.hasProperty("artifactId") ? project.property("artifactId") : "contracts-unknown"
+            if (project.hasProperty("artifactFile")) {
+                def artifactFile = file(project.property("artifactFile"))
+                if (artifactFile.exists()) {
+                    artifact(artifactFile)
+                }
+            }
+            pom {
+                name.set("Contracts")
+                description.set("API contracts & events")
+                url.set("https://github.com/wliamp/contracts-pps")
+            }
+        }
+    }
+
     repositories {
-        mavenCentral()
+        maven {
+            name = "OSSRH"
+            url = uri("https://oss.sonatype.org/service/local/staging/deploy/maven2/")
+            credentials {
+                username = System.getenv("OSSRH_USERNAME") ?: ""
+                password = System.getenv("OSSRH_PASSWORD") ?: ""
+            }
+        }
     }
 }
 
-subprojects {
-    apply plugin: 'maven-publish'
-    apply plugin: 'signing'
-
-    group = rootProject.group
-    version = rootProject.version
-
-    tasks.withType(Test).configureEach {
-        useJUnitPlatform()
-    }
-
-    publishing {
-        publications {
-            mavenJava(MavenPublication) {
-                fileTree(dir: project.projectDir, include: ['**/*.yml', '**/*.yaml', '**/*.json']).files.each { f ->
-                    artifact(f)
-                }
-                pom {
-                    url.set("https://github.com/wliamp/contracts")
-                    licenses {
-                        license {
-                            name.set("Apache License 2.0")
-                            url.set("https://www.apache.org/licenses/LICENSE-2.0")
-                        }
-                    }
-                    developers {
-                        developer {
-                            id.set("wliamp")
-                            name.set("William Phan")
-                            email.set("phnam230197@gmail.com")
-                        }
-                    }
-                    scm {
-                        connection.set("scm:git:git://github.com/wliamp/contracts.git")
-                        developerConnection.set("scm:git:ssh://github.com/wliamp/contracts.git")
-                        url.set("https://github.com/wliamp/contracts")
-                    }
-                }
-            }
-        }
-
-        repositories {
-            maven {
-                name = "GitHubPackages"
-                url = uri("https://maven.pkg.github.com/wliamp/contracts")
-                credentials {
-                    username = findProperty("github.publisher.username") ?: ""
-                    password = findProperty("github.publisher.password") ?: ""
-                }
-            }
-        }
-    }
-
+if (project.hasProperty("artifactFile")) {
     signing {
         useGpgCmd()
-        sign publishing.publications.mavenJava
-    }
-}
-
-nexusPublishing {
-    repositories {
-        sonatype {
-            nexusUrl = uri("https://ossrh-staging-api.central.sonatype.com/service/local/")
-            snapshotRepositoryUrl = uri("https://central.sonatype.com/repository/maven-snapshots/")
-            username = findProperty("central.portal.username") ?: ""
-            password = findProperty("central.portal.password") ?: ""
-        }
+        sign publishing.publications.mavenContracts
     }
 }
