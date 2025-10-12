@@ -1,18 +1,20 @@
 description: |
-  - 🔍 Scan ownership + detect changes
-  - 📦 Package per Actor
-  - 🚀 Publish changed actors
-  - 📣 Notification
+  - 🔍 Detect which actors have modified contracts
+  - 📦 Package contracts per actor
+  - 🚀 Publish updated artifacts to GitHub Packages
+  - 📣 Notify target repositories via repository_dispatch
 
 inputs:
   pat:
-    description: "GitHub Personal Access Token"
+    description: "GitHub Personal Access Token (PAT) with repo & packages:write permissions."
     required: true
   repos:
-    description: "List of repositories to notify (YAML or JSON array)"
+    description: |
+      List of repositories to notify when new actor contracts are published.
+      Format: YAML or JSON array (e.g. ["org/repo1", "org/repo2"])
     required: true
   event:
-    description: "Dispatch event type"
+    description: "Repository dispatch event type name."
     default: "contracts_published"
 
 runs:
@@ -20,9 +22,21 @@ runs:
   steps:
     # ----------------------------------
     # 🧩 Setup environment
+    #
+    # Pulls repository code to analyze recent changes.
+    #
+    # Installs required CLI tools:
+    # - yq / jq for parsing YAML & JSON
+    # - curl for API calls
+    # - zip for packaging artifacts
+    # - xmllint for extracting Maven metadata
+    #
+    # Creates working directories for temporary files and build artifacts.
     # ----------------------------------
     - name: Checkout source
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
 
     - name: Setup tooling
       shell: bash
@@ -36,6 +50,15 @@ runs:
 
     # ----------------------------------
     # 🔍 Scan ownership + detect changes
+    #
+    # Compares the last two commits to find modified contract files.
+    # Reads `ownership.yml` in each use case directory to map files to actors.
+    # For each actor:
+    #   - Determines current version from Maven metadata.
+    #   - Increments patch version if any linked files changed.
+    #   - Saves results in a CSV file (`tmp/version_map.csv`):
+    #       Actor,OldVersion,NewVersion,Changed
+    # Encodes the CSV as BASE64 and exports it to $GITHUB_ENV as VERSION_MAP.
     # ----------------------------------
     - name: Detect changed actors
       id: detect
@@ -86,6 +109,12 @@ runs:
 
     # ----------------------------------
     # 📦 Package per Actor
+    #
+    # Decodes version map and loops through all changed actors.
+    # For each changed actor:
+    #   - Collects relevant contract/event/spec files from all use cases.
+    #   - Copies them into `build/<actor>/...`.
+    #   - Compresses the directory as `build/<actor>-<version>.zip`.
     # ----------------------------------
     - name: Package actors
       id: package
@@ -111,6 +140,12 @@ runs:
 
     # ----------------------------------
     # 🚀 Publish changed actors
+    #
+    # Iterates through version map.
+    # For each changed actor:
+    #   - Publishes the corresponding ZIP artifact to GitHub Packages.
+    #   - Uses Gradle with parameters:
+    #       -PartifactFile, -PartifactId, -Pversion
     # ----------------------------------
     - name: Publish actor packages
       shell: bash
@@ -128,6 +163,16 @@ runs:
 
     # ----------------------------------
     # 📣 Notification
+    #
+    # For each repository in `inputs.repos`:
+    #   - Sends a `repository_dispatch` event (`inputs.event`).
+    #   - Includes payload:
+    #       actor: Actor name
+    #       version: New version
+    #       artifact: ZIP filename
+    #       source_repo: Origin repository
+    #       run_id: Current workflow run
+    # Allows dependent repositories to trigger follow-up workflows (e.g. sync, deploy).
     # ----------------------------------
     - name: Notify target repos
       if: success()
