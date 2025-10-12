@@ -1,26 +1,35 @@
 plugins {
     id 'maven-publish'
-    id 'signing'
 }
 
 group = 'io.github.wliamp.contracts'
 
 // ------------------------
-// Publishing configuration
+// 📦 Publish to GitHub Packages
 // ------------------------
 publishing {
     publications {
         mavenContracts(MavenPublication) {
-            artifactId = project.hasProperty("artifactId") ? project.property("artifactId") : "contracts-unknown"
-            if (project.hasProperty("artifactFile")) {
-                def artifactFile = file(project.property("artifactFile"))
-                if (artifactFile.exists()) {
-                    artifact(artifactFile)
-                }
+            def artifactIdProp = project.hasProperty("artifactId") ? project.property("artifactId") : "contracts-unknown"
+            def versionProp = project.hasProperty("version") ? project.property("version") : "0.0.1-SNAPSHOT"
+            def artifactPath = project.hasProperty("artifactFile") ? project.property("artifactFile") : null
+
+            if (artifactPath == null) {
+                throw new GradleException("❌ Missing -PartifactFile property")
             }
+
+            def artifactFile = file(artifactPath)
+            if (!artifactFile.exists()) {
+                throw new GradleException("❌ Artifact file not found: ${artifactFile}")
+            }
+
+            artifactId = artifactIdProp
+            version = versionProp
+            artifact(artifactFile)
+
             pom {
-                name.set("Contracts")
-                description.set("API contracts & events")
+                name.set("Contracts - ${artifactIdProp}")
+                description.set("Private API Contracts & Events for internal use")
                 url.set("https://github.com/wliamp/contracts-pps")
             }
         }
@@ -28,19 +37,13 @@ publishing {
 
     repositories {
         maven {
-            name = "OSSRH"
-            url = uri("https://oss.sonatype.org/service/local/staging/deploy/maven2/")
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/wliamp/contracts-pps")
+
             credentials {
-                username = System.getenv("OSSRH_USERNAME") ?: ""
-                password = System.getenv("OSSRH_PASSWORD") ?: ""
+                username = System.getenv("GITHUB_ACTOR") ?: ""
+                password = System.getenv("GITHUB_TOKEN") ?: ""
             }
         }
-    }
-}
-
-if (project.hasProperty("artifactFile")) {
-    signing {
-        useGpgCmd()
-        sign publishing.publications.mavenContracts
     }
 }

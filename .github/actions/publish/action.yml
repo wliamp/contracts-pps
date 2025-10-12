@@ -1,20 +1,8 @@
 description: "Build, package, publish contracts and notify PPS repository"
 
 inputs:
-  username:
-    description: "OSSRH username"
-    required: true
-  password:
-    description: "OSSRH password"
-    required: true
-  key:
-    description: "GPG private key"
-    required: true
-  passphrase:
-    description: "GPG passphrase"
-    required: true
   pat:
-    description: "Personal Access Token for notifying"
+    description: "GitHub Personal Access Token (for publishing + notifying)"
     required: true
   repos:
     description: "List of repositories to notify (YAML or JSON array)"
@@ -39,11 +27,6 @@ runs:
         distribution: temurin
         java-version: 25
         cache: gradle
-        server-id: ossrh
-        server-username: ${{ inputs.username }}
-        server-password: ${{ inputs.password }}
-        gpg-private-key: ${{ inputs.key }}
-        gpg-passphrase: ${{ inputs.passphrase }}
 
     - name: Install required tools
       shell: bash
@@ -74,8 +57,8 @@ runs:
           UC=$(yq -r '.metadata.usecase' ownership.yml)
           ACTORS=$(yq -r '.contracts[].producer, .contracts[].consumers[], .rest[].service' ownership.yml | sort -u)
           for actor in $ACTORS; do
-            META_URL="https://repo1.maven.org/maven2/io/github/wliamp/contracts/contracts-${UC}-${actor}/maven-metadata.xml"
-            LATEST=$(curl -s "$META_URL" | xmllint --xpath "string(//metadata/versioning/latest)" - 2>/dev/null || echo "")
+            META_URL="https://maven.pkg.github.com/wliamp/contracts-pps/io/github/wliamp/contracts/contracts-${UC}-${actor}/maven-metadata.xml"
+            LATEST=$(curl -s -u "${{ github.actor }}:${{ inputs.pat }}" "$META_URL" | xmllint --xpath "string(//metadata/versioning/latest)" - 2>/dev/null || echo "")
             if [ -z "$LATEST" ]; then LATEST="0.0.0"; fi
             IFS='.' read -r MAJ MIN PATCH <<< "$LATEST"
             PATCH=$((PATCH + 1))
@@ -134,8 +117,11 @@ runs:
     # ----------------------
     # 🚀 Publish changed packages
     # ----------------------
-    - name: Publish to OSSRH
+    - name: Publish to GitHub Packages
       shell: bash
+      env:
+        GITHUB_ACTOR: ${{ github.actor }}
+        GITHUB_TOKEN: ${{ inputs.pat }}
       run: |
         echo "$VERSION_MAP" | base64 -d > /tmp/version_map.csv
         CHANGED_UC=$(git diff --name-only HEAD~1 HEAD | grep '^contracts/' | cut -d'/' -f2 | sort -u)
@@ -179,6 +165,6 @@ runs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ inputs.pat }}" \
             "https://api.github.com/repos/${repo}/dispatches" \
-            -d "{\"event_type\": \"${{ inputs.event_type }}\", \"client_payload\": {\"source_repo\": \"${{ github.repository }}\", \"run_id\": \"${{ github.run_id }}\"}}" \
+            -d "{\"event_type\": \"${{ inputs.event }}\", \"client_payload\": {\"source_repo\": \"${{ github.repository }}\", \"run_id\": \"${{ github.run_id }}\"}}" \
             | jq -r '.message? // "✅ OK"' || echo "⚠️ Failed to notify $repo"
         done

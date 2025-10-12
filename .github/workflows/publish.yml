@@ -15,10 +15,6 @@ jobs:
 
     - uses: ./.github/actions/publish
       with:
-        username: ${{ secrets.OSSRH_USERNAME }}
-        password: ${{ secrets.OSSRH_PASSWORD }}
-        key: ${{ secrets.GPG_PRIVATE_KEY }}
-        passphrase: ${{ secrets.GPG_PASSPHRASE }}
         pat: ${{ secrets.PAT }}
         repos: ${{ vars.TARGET_REPOS }}
         event: ${{ vars.EVENT_TYPE }}
