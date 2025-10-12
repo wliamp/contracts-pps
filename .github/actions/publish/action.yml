@@ -1,0 +1,184 @@
+description: "Build, package, publish contracts and notify PPS repository"
+
+inputs:
+  username:
+    description: "OSSRH username"
+    required: true
+  password:
+    description: "OSSRH password"
+    required: true
+  key:
+    description: "GPG private key"
+    required: true
+  passphrase:
+    description: "GPG passphrase"
+    required: true
+  pat:
+    description: "Personal Access Token for notifying"
+    required: true
+  repos:
+    description: "List of repositories to notify (YAML or JSON array)"
+    required: true
+  event:
+    description: "Dispatch event type name"
+    required: false
+    default: "contracts_published"
+
+runs:
+  using: composite
+  steps:
+    # ----------------------
+    # 🧩 Setup environment
+    # ----------------------
+    - name: Checkout source
+      uses: actions/checkout@v4
+
+    - name: Setup Java and Gradle
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: 25
+        cache: gradle
+        server-id: ossrh
+        server-username: ${{ inputs.username }}
+        server-password: ${{ inputs.password }}
+        gpg-private-key: ${{ inputs.key }}
+        gpg-passphrase: ${{ inputs.passphrase }}
+
+    - name: Install required tools
+      shell: bash
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y yq jq curl zip libxml2-utils
+
+    # ----------------------
+    # 🧱 Prepare build stage
+    # ----------------------
+    - name: Initialize build directories
+      shell: bash
+      run: mkdir -p build
+
+    # ----------------------
+    # 🔍 Discover & versioning
+    # ----------------------
+    - name: Determine new versions for all actors
+      id: versioning
+      shell: bash
+      run: |
+        COMMON_FILE="contracts/shared/common-metadata.json"
+        echo "COMMON_FILE=$COMMON_FILE" >> $GITHUB_ENV
+        for uc_dir in contracts/*/; do
+          [[ "$uc_dir" == *"shared"* ]] && continue
+          echo ">>> Checking use case: $uc_dir"
+          cd "$uc_dir"
+          UC=$(yq -r '.metadata.usecase' ownership.yml)
+          ACTORS=$(yq -r '.contracts[].producer, .contracts[].consumers[], .rest[].service' ownership.yml | sort -u)
+          for actor in $ACTORS; do
+            META_URL="https://repo1.maven.org/maven2/io/github/wliamp/contracts/contracts-${UC}-${actor}/maven-metadata.xml"
+            LATEST=$(curl -s "$META_URL" | xmllint --xpath "string(//metadata/versioning/latest)" - 2>/dev/null || echo "")
+            if [ -z "$LATEST" ]; then LATEST="0.0.0"; fi
+            IFS='.' read -r MAJ MIN PATCH <<< "$LATEST"
+            PATCH=$((PATCH + 1))
+            if [ "$PATCH" -gt 9 ]; then
+              PATCH=0; MIN=$((MIN + 1))
+              if [ "$MIN" -gt 9 ]; then
+                MIN=0; MAJ=$((MAJ + 1))
+              fi
+            fi
+            VER="${MAJ}.${MIN}.${PATCH}"
+            echo "UseCase=$UC | Actor=$actor | $LATEST → $VER"
+            echo "${UC},${actor},${VER}" >> /tmp/version_map.csv
+          done
+          cd - >/dev/null
+        done
+        echo "VERSION_MAP=$(base64 -w0 /tmp/version_map.csv)" >> $GITHUB_ENV
+
+    # ----------------------
+    # 📦 Package changed use cases
+    # ----------------------
+    - name: Package changed use cases
+      id: package
+      shell: bash
+      run: |
+        echo "$VERSION_MAP" | base64 -d > /tmp/version_map.csv
+        CHANGED_UC=$(git diff --name-only HEAD~1 HEAD | grep '^contracts/' | cut -d'/' -f2 | sort -u)
+        echo "Changed UCs: $CHANGED_UC"
+        SUMMARY_FILE="/tmp/publish_summary.md"
+        echo "| Use Case | Actor | Version | Artifact |" > "$SUMMARY_FILE"
+        echo "|-----------|--------|----------|-----------|" >> "$SUMMARY_FILE"
+        for UC in $CHANGED_UC; do
+          echo ">>> Building UC: $UC"
+          while IFS=',' read -r CSV_UC ACTOR VER; do
+            [[ "$CSV_UC" != "$UC" ]] && continue
+            echo "📦 Building ${ACTOR}-${VER}.zip (UC: $UC)"
+            UC_DIR="contracts/${UC}"
+            PKG_DIR="build/${UC}/${ACTOR}"
+            mkdir -p "$PKG_DIR"
+            yq -r '.contracts[] | select((.producer == "'$ACTOR'") or (.consumers[]? == "'$ACTOR'")) | .file' "$UC_DIR/ownership.yml" | while read -r f; do
+              [ -f "$UC_DIR/$f" ] && mkdir -p "$PKG_DIR/$(dirname "$f")" && cp "$UC_DIR/$f" "$PKG_DIR/$f"
+            done
+            yq -r '.rest[] | select(.service == "'$ACTOR'") | .spec' "$UC_DIR/ownership.yml" | while read -r f; do
+              [ -f "$UC_DIR/$f" ] && mkdir -p "$PKG_DIR/$(dirname "$f")" && cp "$UC_DIR/$f" "$PKG_DIR/$f"
+            done
+            if [ -f "$COMMON_FILE" ]; then
+              cp "$COMMON_FILE" "$PKG_DIR/"
+            fi
+            cd "build/${UC}"
+            zip -r "${ACTOR}-${VER}.zip" "$ACTOR" >/dev/null
+            cd - >/dev/null
+            echo "| ${UC} | ${ACTOR} | ${VER} | ${ACTOR}-${VER}.zip |" >> "$SUMMARY_FILE"
+          done < /tmp/version_map.csv
+        done
+        echo "SUMMARY_FILE=$SUMMARY_FILE" >> $GITHUB_ENV
+
+    # ----------------------
+    # 🚀 Publish changed packages
+    # ----------------------
+    - name: Publish to OSSRH
+      shell: bash
+      run: |
+        echo "$VERSION_MAP" | base64 -d > /tmp/version_map.csv
+        CHANGED_UC=$(git diff --name-only HEAD~1 HEAD | grep '^contracts/' | cut -d'/' -f2 | sort -u)
+        for UC in $CHANGED_UC; do
+          while IFS=',' read -r CSV_UC ACTOR VER; do
+            [[ "$CSV_UC" != "$UC" ]] && continue
+            FILE="build/${UC}/${ACTOR}-${VER}.zip"
+            echo "🚀 Publishing $FILE"
+            ./gradlew publish \
+              -PartifactFile="$FILE" \
+              -PartifactId="${ACTOR}" \
+              -Pversion="$VER"
+          done < /tmp/version_map.csv
+        done
+
+    # ----------------------
+    # 🧾 Job summary
+    # ----------------------
+    - name: Generate job summary
+      if: always()
+      shell: bash
+      run: |
+        echo "### 📦 Contracts Published" >> $GITHUB_STEP_SUMMARY
+        if [ -f "$SUMMARY_FILE" ]; then
+          cat "$SUMMARY_FILE" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "_No changed contracts found._" >> $GITHUB_STEP_SUMMARY
+        fi
+
+    # ----------------------
+    # 📣 Notification
+    # ----------------------
+    - name: Notify target repos
+      if: success()
+      shell: bash
+      run: |
+        echo "🔔 Notifying repositories..."
+        echo "${{ inputs.repos }}" | yq -r '.[]' | while read -r repo; do
+          echo "→ Sending dispatch to $repo"
+          curl -s -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ inputs.pat }}" \
+            "https://api.github.com/repos/${repo}/dispatches" \
+            -d "{\"event_type\": \"${{ inputs.event_type }}\", \"client_payload\": {\"source_repo\": \"${{ github.repository }}\", \"run_id\": \"${{ github.run_id }}\"}}" \
+            | jq -r '.message? // "✅ OK"' || echo "⚠️ Failed to notify $repo"
+        done
